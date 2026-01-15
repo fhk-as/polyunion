@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygon Union Tool</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0a0e12;
+            --bg-secondary: #141920;
+            --bg-tertiary: #1e2630;
+            --accent-primary: #00ffa3;
+            --accent-secondary: #00d4ff;
+            --text-primary: #e8edf2;
+            --text-secondary: #8b95a1;
+            --border: rgba(255, 255, 255, 0.08);
+            --shadow: rgba(0, 0, 0, 0.4);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 60px 1fr;
+            height: 100vh;
+            gap: 0;
+        }
+
+        .icon-bar {
+            background: var(--bg-tertiary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
+            gap: 8px;
+        }
+
+        .icon-button {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            position: relative;
+            border: 1px solid transparent;
+        }
+
+        .icon-button:hover {
+            background: var(--bg-secondary);
+            border-color: var(--accent-primary);
+        }
+
+        .icon-button:active {
+            transform: scale(0.95);
+        }
+
+        .icon-button.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .icon-button.active {
+            background: rgba(0, 255, 163, 0.1);
+            border-color: var(--accent-primary);
+        }
+
+        .icon-button svg {
+            width: 20px;
+            height: 20px;
+            stroke: var(--text-primary);
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .icon-button:hover svg {
+            stroke: var(--accent-primary);
+        }
+
+        .icon-button.active svg {
+            stroke: var(--accent-primary);
+        }
+
+        .icon-divider {
+            width: 30px;
+            height: 1px;
+            background: var(--border);
+            margin: 12px 0;
+        }
+
+        .icon-tooltip {
+            position: absolute;
+            left: 55px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 1000;
+            box-shadow: 0 4px 12px var(--shadow);
+        }
+
+        .icon-button:hover .icon-tooltip {
+            opacity: 1;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .polygon-label {
+            background: rgba(20, 25, 32, 0.9);
+            border: 1px solid var(--accent-primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-primary);
+            white-space: nowrap;
+            box-shadow: 0 2px 8px var(--shadow);
+            pointer-events: none;
+        }
+
+        .polygon-label.union-label {
+            border-color: #ffff00;
+            color: #ffff00;
+        }
+
+        .map-container {
+            position: relative;
+            background: var(--bg-tertiary);
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .map-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 25, 32, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 16px 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            z-index: 1000;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            box-shadow: 0 8px 24px var(--shadow);
+        }
+
+        .leaflet-container {
+            background: #0d1117 !important;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-primary);
+            padding: 16px 20px;
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            z-index: 10000;
+            box-shadow: 0 8px 24px var(--shadow);
+            animation: slideInUp 0.3s ease;
+        }
+
+        @keyframes slideInUp {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon-bar">
+            <div class="icon-button" onclick="document.getElementById('fileInput').click()" title="Upload">
+                <svg viewBox="0 0 24 24">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span class="icon-tooltip">Upload GeoJSON</span>
+            </div>
+
+            <div class="icon-divider"></div>
+
+            <div class="icon-button disabled" id="iconSelectAll" onclick="selectAll()" title="Select All">
+                <svg viewBox="0 0 24 24">
+                    <polyline points="9 11 12 14 22 4"></polyline>
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                </svg>
+                <span class="icon-tooltip">Select All</span>
+            </div>
+
+            <div class="icon-button disabled" id="iconClear" onclick="clearSelection()" title="Clear">
+                <svg viewBox="0 0 24 24">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                <span class="icon-tooltip">Clear Selection</span>
+            </div>
+
+            <div class="icon-divider"></div>
+
+            <div class="icon-button disabled" id="iconUnion" onclick="performUnion()" title="Union">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v6m0 6v6m8.66-15.66l-4.24 4.24m-4.24 4.24l-4.24 4.24m15.66-.66l-4.24-4.24m-4.24-4.24L4.34 4.34"></path>
+                </svg>
+                <span class="icon-tooltip">Union Polygons</span>
+            </div>
+
+            <div class="icon-button disabled" id="iconDownload" onclick="downloadUnion()" title="Download" style="display: none;">
+                <svg viewBox="0 0 24 24">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span class="icon-tooltip">Download Union</span>
+            </div>
+
+            <div class="icon-divider"></div>
+
+            <div class="icon-button disabled" id="iconDownloadAll" onclick="downloadAllData()" title="Download All">
+                <svg viewBox="0 0 24 24">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="12" y1="18" x2="12" y2="12"></line>
+                    <line x1="9" y1="15" x2="12" y2="18"></line>
+                    <line x1="15" y1="15" x2="12" y2="18"></line>
+                </svg>
+                <span class="icon-tooltip">Download All Data</span>
+            </div>
+
+            <input type="file" id="fileInput" accept=".json,.geojson" onchange="handleFileUpload(event)">
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-overlay" id="mapInfo">
+                <div>Ready to load polygons</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize map
+        const map = L.map('map', {
+            zoomControl: true,
+            attributionControl: false
+        }).setView([0, 0], 2);
+
+        // Dark tile layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            minZoom: 1
+        }).addTo(map);
+
+        // State
+        let polygons = [];
+        let selectedIndices = new Set();
+        let layerGroup = L.layerGroup().addTo(map);
+        let labelGroup = L.layerGroup().addTo(map);
+        let unionLayer = null;
+        let unionResult = null;
+        let unionedIndices = new Set();
+
+        // Color palette
+        const colors = [
+            '#00ffa3', '#00d4ff', '#ff00ff', '#ffaa00', 
+            '#ff3366', '#66ff33', '#3366ff', '#ff6633',
+            '#33ffff', '#ff33ff', '#ffff33', '#33ff66'
+        ];
+
+        function getColor(index) {
+            return colors[index % colors.length];
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const geojson = JSON.parse(e.target.result);
+                    loadGeoJSON(geojson);
+                } catch (error) {
+                    showToast('Error parsing GeoJSON file');
+                    console.error(error);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadGeoJSON(geojson) {
+            polygons = [];
+            selectedIndices.clear();
+            unionedIndices.clear();
+            layerGroup.clearLayers();
+            labelGroup.clearLayers();
+            if (unionLayer) {
+                unionLayer.remove();
+                unionLayer = null;
+            }
+            unionResult = null;
+
+            // Extract polygons
+            if (geojson.type === 'FeatureCollection') {
+                geojson.features.forEach((feature, idx) => {
+                    if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                        polygons.push({
+                            feature: feature,
+                            index: idx,
+                            color: getColor(idx)
+                        });
+                    }
+                });
+            } else if (geojson.type === 'Feature') {
+                if (geojson.geometry.type === 'Polygon' || geojson.geometry.type === 'MultiPolygon') {
+                    polygons.push({
+                        feature: geojson,
+                        index: 0,
+                        color: getColor(0)
+                    });
+                }
+            }
+
+            if (polygons.length === 0) {
+                showToast('No polygons found in file');
+                return;
+            }
+
+            // Display polygons
+            renderPolygons();
+            renderPolygonList();
+            updateStats();
+            fitMapToPolygons();
+
+            document.getElementById('iconSelectAll').classList.remove('disabled');
+            document.getElementById('iconClear').classList.remove('disabled');
+            document.getElementById('iconDownloadAll').classList.remove('disabled');
+            document.getElementById('iconDownload').style.display = 'none';
+
+            showToast(`Successfully loaded ${polygons.length} polygons`);
+        }
+
+        function renderPolygons() {
+            layerGroup.clearLayers();
+            labelGroup.clearLayers();
+
+            polygons.forEach((poly, idx) => {
+                // Skip polygons that have been unioned
+                if (unionedIndices.has(idx)) return;
+
+                const isSelected = selectedIndices.has(idx);
+                const layer = L.geoJSON(poly.feature, {
+                    style: {
+                        color: poly.color,
+                        weight: isSelected ? 3 : 2,
+                        opacity: isSelected ? 1 : 0.6,
+                        fillOpacity: isSelected ? 0.3 : 0.15
+                    }
+                });
+
+                layer.on('click', () => togglePolygon(idx));
+                layerGroup.addLayer(layer);
+
+                // Add label if count property exists
+                const count = poly.feature.properties?.count;
+                if (count !== undefined && count !== null) {
+                    const centroid = turf.centroid(poly.feature);
+                    const label = L.marker(
+                        [centroid.geometry.coordinates[1], centroid.geometry.coordinates[0]],
+                        {
+                            icon: L.divIcon({
+                                className: 'polygon-label',
+                                html: count.toString(),
+                                iconSize: null
+                            })
+                        }
+                    );
+                    labelGroup.addLayer(label);
+                }
+            });
+        }
+
+        function renderPolygonList() {
+            // No list UI in minimal version
+        }
+
+        function togglePolygon(index) {
+            // Don't toggle if already unioned
+            if (unionedIndices.has(index)) return;
+
+            if (selectedIndices.has(index)) {
+                selectedIndices.delete(index);
+            } else {
+                selectedIndices.add(index);
+            }
+
+            renderPolygons();
+            renderPolygonList();
+            updateStats();
+            updateUnionButton();
+        }
+
+        function selectAll() {
+            selectedIndices.clear();
+            polygons.forEach((_, idx) => {
+                if (!unionedIndices.has(idx)) {
+                    selectedIndices.add(idx);
+                }
+            });
+            renderPolygons();
+            renderPolygonList();
+            updateStats();
+            updateUnionButton();
+        }
+
+        function clearSelection() {
+            selectedIndices.clear();
+            renderPolygons();
+            renderPolygonList();
+            updateStats();
+            updateUnionButton();
+        }
+
+        function updateStats() {
+            // No stats UI in minimal version
+            const activeCount = polygons.length - unionedIndices.size + (unionResult ? 1 : 0);
+            updateMapInfo(`${activeCount} polygon${activeCount !== 1 ? 's' : ''} | ${selectedIndices.size} selected`);
+        }
+
+        function updateUnionButton() {
+            const iconUnion = document.getElementById('iconUnion');
+            if (selectedIndices.size < 2) {
+                iconUnion.classList.add('disabled');
+            } else {
+                iconUnion.classList.remove('disabled');
+            }
+        }
+
+        function performUnion() {
+            if (selectedIndices.size < 2) {
+                showToast('Select at least 2 polygons to union');
+                return;
+            }
+
+            try {
+                // Check if turf is loaded
+                if (typeof turf === 'undefined') {
+                    showToast('Turf.js library not loaded');
+                    return;
+                }
+
+                // Get selected polygons
+                const selectedPolygons = Array.from(selectedIndices)
+                    .map(idx => polygons[idx].feature);
+
+                console.log('Starting union of', selectedPolygons.length, 'polygons');
+
+                // Calculate sum of count values
+                let totalCount = 0;
+                selectedPolygons.forEach(feature => {
+                    const count = feature.properties?.count;
+                    if (count !== undefined && count !== null) {
+                        totalCount += parseFloat(count) || 0;
+                    }
+                });
+
+                // Union them progressively
+                let result = selectedPolygons[0];
+                for (let i = 1; i < selectedPolygons.length; i++) {
+                    console.log(`Unioning polygon ${i + 1}/${selectedPolygons.length}`);
+                    result = turf.union(result, selectedPolygons[i]);
+                }
+
+                console.log('Union complete:', result);
+                
+                // Add the summed count to the result properties
+                if (totalCount > 0) {
+                    if (!result.properties) {
+                        result.properties = {};
+                    }
+                    result.properties.count = totalCount;
+                }
+                
+                unionResult = result;
+
+                // Mark selected polygons as unioned
+                selectedIndices.forEach(idx => unionedIndices.add(idx));
+
+                // Remove old union layer if exists
+                if (unionLayer) {
+                    unionLayer.remove();
+                }
+
+                // Display union result
+                unionLayer = L.geoJSON(result, {
+                    style: {
+                        color: '#ffff00',
+                        weight: 4,
+                        opacity: 1,
+                        fillOpacity: 0.4,
+                        dashArray: '5, 5'
+                    }
+                }).addTo(map);
+
+                // Add label for union if it has a count
+                if (totalCount > 0) {
+                    const centroid = turf.centroid(result);
+                    const label = L.marker(
+                        [centroid.geometry.coordinates[1], centroid.geometry.coordinates[0]],
+                        {
+                            icon: L.divIcon({
+                                className: 'polygon-label union-label',
+                                html: totalCount.toString(),
+                                iconSize: null
+                            })
+                        }
+                    );
+                    labelGroup.addLayer(label);
+                }
+
+                // Clear selection and re-render
+                selectedIndices.clear();
+                renderPolygons();
+                renderPolygonList();
+                updateStats();
+                updateUnionButton();
+
+                updateMapInfo(`Union complete: ${unionedIndices.size} polygons merged${totalCount > 0 ? ` (count: ${totalCount})` : ''}`);
+                document.getElementById('iconDownload').style.display = 'flex';
+                document.getElementById('iconDownload').classList.remove('disabled');
+                showToast('Union completed successfully!');
+
+            } catch (error) {
+                showToast('Error performing union: ' + error.message);
+                console.error('Union error:', error);
+            }
+        }
+
+        function downloadUnion() {
+            if (!unionResult) return;
+
+            const dataStr = JSON.stringify(unionResult, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'union_result.geojson';
+            link.click();
+            
+            URL.revokeObjectURL(url);
+            showToast('Union result downloaded');
+        }
+
+        function downloadAllData() {
+            const features = [];
+
+            // Add union result if it exists
+            if (unionResult) {
+                features.push(unionResult);
+            }
+
+            // Add remaining non-unioned polygons
+            polygons.forEach((poly, idx) => {
+                if (!unionedIndices.has(idx)) {
+                    features.push(poly.feature);
+                }
+            });
+
+            if (features.length === 0) {
+                showToast('No data to download');
+                return;
+            }
+
+            const featureCollection = {
+                type: 'FeatureCollection',
+                features: features
+            };
+
+            const dataStr = JSON.stringify(featureCollection, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'modified_polygons.geojson';
+            link.click();
+            
+            URL.revokeObjectURL(url);
+            showToast('All data downloaded');
+        }
+
+        function fitMapToPolygons() {
+            if (polygons.length === 0) return;
+
+            const bounds = L.latLngBounds();
+            polygons.forEach(poly => {
+                const layer = L.geoJSON(poly.feature);
+                bounds.extend(layer.getBounds());
+            });
+
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
+
+        function updateMapInfo(text) {
+            document.getElementById('mapInfo').innerHTML = `<div>${text}</div>`;
+        }
+
+        function showToast(message) {
+            const existing = document.querySelector('.toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Initialize
+        updateUnionButton();
+    </script>
+</body>
+</html>
